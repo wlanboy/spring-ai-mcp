@@ -2,6 +2,22 @@
 
 Ein minimaler MCP-Server (Model Context Protocol) auf Basis von Spring Boot 4 und Spring AI 2.0.
 
+Das **Model Context Protocol** ist ein offener Standard, mit dem KI-Modelle (z. B. Claude, GPT)
+strukturiert auf externe Tools und Dienste zugreifen können — ohne Prompt-Engineering für
+jeden Anwendungsfall neu schreiben zu müssen.
+
+Dieses Projekt zeigt den kleinstmöglichen Aufbau:
+
+| Schicht | Technologie |
+|---|---|
+| HTTP-Transport | Spring WebMVC oder WebFlux (SSE) |
+| MCP-Protokollstack | `spring-ai-starter-mcp-server-webmvc` / `-webflux` |
+| Tool-Definition | `@Tool`-Annotation auf einfachen Spring-Beans |
+| Build | Maven mit AOT-Processing für schnellen Start |
+
+Die enthaltenen Beispiel-Tools (`greet`, `serverTime`) demonstrieren das Grundprinzip
+und lassen sich als Vorlage für eigene Integrationen verwenden.
+
 ## Voraussetzungen
 
 - Java 25
