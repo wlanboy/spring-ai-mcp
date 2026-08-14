@@ -136,6 +136,83 @@ server.port=8080
 
 ---
 
+### 5a. Protokoll-Variante wählen (`spring.ai.mcp.server.protocol`)
+
+Sowohl der WebMVC- als auch der WebFlux-Starter registrieren je nach Wert
+dieser Property eine von drei unterschiedlichen Transport-Implementierungen
+(`McpServerSseWebMvcAutoConfiguration`, `McpServerStreamableHttpWebMvcAutoConfiguration`,
+`McpServerStatelessWebMvcAutoConfiguration` — bzw. die WebFlux-Pendants). Es
+handelt sich also nicht nur um ein Flag, sondern um drei komplett
+unterschiedliche Server-Implementierungen mit eigenem Endpoint-Verhalten.
+
+```properties
+spring.ai.mcp.server.protocol=SSE | STREAMABLE | STATELESS
+```
+
+#### `SSE` (deprecated, Legacy-Protokoll)
+
+- Zwei getrennte Endpoints: `GET /sse` (öffnet eine dauerhafte
+  SSE-Verbindung, liefert eine `sessionId`) und `POST /mcp/message`
+  (Client schickt JSON-RPC-Requests, verknüpft über die `sessionId` aus
+  dem SSE-Handshake).
+- Die zugehörigen Properties (`sse-endpoint`, `sse-message-endpoint`,
+  `base-url`, `keep-alive-interval`) sind in der aktuellen Version bereits
+  als `@deprecated` markiert — nur für ältere MCP-Clients gedacht, die das
+  neue Streamable-HTTP-Protokoll noch nicht unterstützen.
+- **Konsequenz:** voll zustandsbehaftet. Die offene SSE-Verbindung lebt auf
+  genau einer Server-Instanz; horizontale Skalierung erfordert Sticky
+  Sessions oder gemeinsam genutzten Session-Speicher. Fällt die Instanz
+  aus, bricht die Verbindung ab und der Client muss neu verbinden.
+
+#### `STREAMABLE` (Standardwert)
+
+- Ein einzelner Endpoint (`spring.ai.mcp.server.streamable-http.mcp-endpoint`,
+  Default `/mcp`) für alle Requests. Der Server kann pro Response
+  entweder direkt JSON zurückgeben oder auf eine SSE-Stream-Antwort
+  „hochstufen“ (nötig für Server-Push wie Sampling-Requests oder
+  Change-Notifications).
+- Beim `initialize`-Call vergibt der Server eine Session, die der Client
+  über den Header `Mcp-Session-Id` bei allen Folgerequests mitschicken
+  muss. Zusätzliche Optionen: `keep-alive-interval` (Ping-Intervall für
+  offene Streams), `disallow-delete` (verbietet `DELETE /mcp`, also das
+  aktive Beenden der Session durch den Client).
+- **Konsequenz:** zustandsbehaftet, aber flexibler als `SSE` — unterstützt
+  Resumability (Wiederaufnahme unterbrochener Streams über
+  `Last-Event-ID`) und bidirektionale Server→Client-Kommunikation. Für
+  horizontale Skalierung wird trotzdem entweder Sticky Routing (Session-ID
+  → gleiche Instanz) oder ein geteilter Session-Store benötigt.
+
+#### `STATELESS`
+
+- Derselbe `POST /mcp`-Endpoint wie bei `STREAMABLE`, aber **ohne**
+  Session-Konzept: kein `Mcp-Session-Id`-Header, keine offene
+  SSE-Verbindung, kein `DELETE /mcp`. Jeder Request (`initialize`,
+  `tools/list`, `tools/call`, …) wird unabhängig und vollständig
+  in sich abgeschlossen verarbeitet.
+- Verifiziert durch direkten Test gegen diesen Server: `tools/list`
+  funktioniert als eigenständiger `curl`-Aufruf ganz ohne vorheriges
+  `initialize` in derselben Verbindung und ohne jeglichen Session-Header.
+- **Konsequenz:**
+  - ✅ Beliebig horizontal skalierbar hinter einem einfachen Load Balancer
+    ohne Sticky Sessions — jede Instanz kann jeden Request beantworten.
+  - ✅ Passt gut zu Serverless/Container-Umgebungen mit kurzlebigen
+    Instanzen.
+  - ❌ Kein Server-initiierter Push: Sampling-Requests, `listChanged`-
+    Notifications für Tools/Resources/Prompts kommen beim Client nicht an,
+    da kein offener Stream existiert, über den der Server sie schicken
+    könnte.
+  - ❌ Keine Resumability — ein abgebrochener Request muss vom Client
+    komplett wiederholt werden, es gibt nichts, an das angeknüpft werden
+    könnte.
+  - Sinnvoll, wenn die Tools selbst zustandslos sind (wie `greet` und
+    `serverTime` in diesem Projekt) und keine der Push-Fähigkeiten
+    benötigt werden.
+
+Aktuell nutzt dieses Projekt (`application.properties`) den Modus
+`STATELESS`.
+
+---
+
 ### 6. Server starten
 
 ```bash
