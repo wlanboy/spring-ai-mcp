@@ -3,8 +3,7 @@
 Ein minimaler MCP-Server (Model Context Protocol) auf Basis von Spring Boot 4 und Spring AI 2.0.
 
 Das **Model Context Protocol** ist ein offener Standard, mit dem KI-Modelle (z. B. Claude, GPT)
-strukturiert auf externe Tools und Dienste zugreifen können — ohne Prompt-Engineering für
-jeden Anwendungsfall neu schreiben zu müssen.
+strukturiert auf externe Tools und Dienste zugreifen können.
 
 Dieses Projekt zeigt den kleinstmöglichen Aufbau:
 
@@ -13,7 +12,7 @@ Dieses Projekt zeigt den kleinstmöglichen Aufbau:
 | HTTP-Transport | Spring WebMVC oder WebFlux (SSE) |
 | MCP-Protokollstack | `spring-ai-starter-mcp-server-webmvc` / `-webflux` |
 | Tool-Definition | `@Tool`-Annotation auf einfachen Spring-Beans |
-| Build | Maven mit AOT-Processing für schnellen Start |
+| Build | Standard-Maven-Build (`spring-boot-maven-plugin`) |
 
 Die enthaltenen Beispiel-Tools (`greet`, `serverTime`) demonstrieren das Grundprinzip
 und lassen sich als Vorlage für eigene Integrationen verwenden.
@@ -40,25 +39,16 @@ Spring Initializr liefert ein fertiges Maven-Projekt mit `mvnw`, `.gitignore` un
 einer leeren `HelloworldApplication.java`.
 
 > **Hinweis:** `spring-ai-mcp-server` erzeugt den Servlet-Starter
-> `spring-ai-starter-mcp-server`. In Schritt 2b wird das Artifact auf die
-> WebFlux-Variante `spring-ai-starter-mcp-server-web` geändert.
+> `spring-ai-starter-mcp-server`. In Schritt 2 wird das Artifact auf die
+> WebFlux-Variante `spring-ai-starter-mcp-server-webflux` geändert.
 
 ---
 
 ### 2. pom.xml anpassen
 
-Drei Anpassungen gegenüber dem generierten Stand:
+Eine Anpassung gegenüber dem generierten Stand:
 
-**a) `start-class` in `<properties>` eintragen** (für AOT-fähiges Packaging):
-
-```xml
-<properties>
-    <java.version>25</java.version>
-    <start-class>com.example.helloworld.HelloworldApplication</start-class>
-</properties>
-```
-
-**b) Generierten MCP-Starter auf WebMVC oder WebFlux-Variante umstellen:**
+**Generierten MCP-Starter auf WebMVC oder WebFlux-Variante umstellen:**
 
 Der Initializr erzeugt den Servlet-basierten Starter. Den `artifactId` auf die
 reaktive Variante ändern:
@@ -126,13 +116,17 @@ spring.application.name=helloworld
 
 spring.ai.mcp.server.name=hello-world-mcp
 spring.ai.mcp.server.version=1.0.0
-spring.ai.mcp.server.type=ASYNC  <-- nur für Webflux
+spring.ai.mcp.server.type=ASYNC        <-- nur für Webflux
+spring.ai.mcp.server.protocol=STATELESS  <-- siehe Abschnitt 5a
 
 server.port=8080
 ```
 
 - `type=ASYNC` aktiviert den reaktiven SSE-Transport (passend zu WebFlux).
 - `name` und `version` erscheinen im MCP-Handshake.
+- `protocol` bestimmt den Transport-Modus (`SSE`, `STREAMABLE`, `STATELESS`) —
+  siehe Abschnitt 5a für Details und Konsequenzen. Aktuell in diesem
+  Projekt: `STATELESS`.
 
 ---
 
@@ -176,7 +170,7 @@ spring.ai.mcp.server.protocol=SSE | STREAMABLE | STATELESS
   muss. Zusätzliche Optionen: `keep-alive-interval` (Ping-Intervall für
   offene Streams), `disallow-delete` (verbietet `DELETE /mcp`, also das
   aktive Beenden der Session durch den Client).
-- **Konsequenz:** zustandsbehaftet, aber flexibler als `SSE` — unterstützt
+- **Konsequenz:** zustandsbehaftet, aber flexibler als `SSE`. Unterstützt
   Resumability (Wiederaufnahme unterbrochener Streams über
   `Last-Event-ID`) und bidirektionale Server→Client-Kommunikation. Für
   horizontale Skalierung wird trotzdem entweder Sticky Routing (Session-ID
@@ -194,14 +188,14 @@ spring.ai.mcp.server.protocol=SSE | STREAMABLE | STATELESS
   `initialize` in derselben Verbindung und ohne jeglichen Session-Header.
 - **Konsequenz:**
   - ✅ Beliebig horizontal skalierbar hinter einem einfachen Load Balancer
-    ohne Sticky Sessions — jede Instanz kann jeden Request beantworten.
+    ohne Sticky Sessions. Jede Instanz kann jeden Request beantworten.
   - ✅ Passt gut zu Serverless/Container-Umgebungen mit kurzlebigen
     Instanzen.
   - ❌ Kein Server-initiierter Push: Sampling-Requests, `listChanged`-
     Notifications für Tools/Resources/Prompts kommen beim Client nicht an,
     da kein offener Stream existiert, über den der Server sie schicken
     könnte.
-  - ❌ Keine Resumability — ein abgebrochener Request muss vom Client
+  - ❌ Keine Resumability. Ein abgebrochener Request muss vom Client
     komplett wiederholt werden, es gibt nichts, an das angeknüpft werden
     könnte.
   - Sinnvoll, wenn die Tools selbst zustandslos sind (wie `greet` und
@@ -223,16 +217,23 @@ Der Server lauscht auf `http://localhost:8080`.
 
 ---
 
-## LLM Studio
+## LM Studio
+
+Passend zum aktuell konfigurierten `protocol=STATELESS` (bzw. `STREAMABLE`)
+wird der Streamable-HTTP-Endpoint `/mcp` verwendet, **nicht** `/sse`:
 
 ```json
 {
   "mcpServers": {
     "hello-world-mcp": {
-      "type": "sse",
-      "url": "http://localhost:8080/sse"
+      "type": "streamable-http",
+      "url": "http://localhost:8080/mcp"
     }
   }
 }
+```
 
-``` 
+> **Achtung:** `/sse` existiert nur, wenn `spring.ai.mcp.server.protocol=SSE`
+> gesetzt ist (siehe Abschnitt 5a). Mit dem aktuellen `STATELESS`-Modus ist
+> dieser Endpoint nicht registriert — ein Client, der auf `type: sse` /
+> `/sse` konfiguriert ist, kann sich nicht verbinden.
