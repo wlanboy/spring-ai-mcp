@@ -189,7 +189,7 @@ spring.ai.mcp.server.protocol=SSE | STREAMABLE | STATELESS
 - **Konsequenz:**
   - ✅ Beliebig horizontal skalierbar hinter einem einfachen Load Balancer
     ohne Sticky Sessions. Jede Instanz kann jeden Request beantworten.
-  - ✅ Passt gut zu Serverless/Container-Umgebungen mit kurzlebigen
+  - ✅ Passt gut zu Serverless-Umgebungen mit kurzlebigen
     Instanzen.
   - ❌ Kein Server-initiierter Push: Sampling-Requests, `listChanged`-
     Notifications für Tools/Resources/Prompts kommen beim Client nicht an,
